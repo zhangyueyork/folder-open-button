@@ -1,0 +1,51 @@
+.folder-open-button-host {
+	display: flex;
+	align-items: center;
+}
+
+.folder-open-button {
+	display: inline-flex;
+	flex: 0 0 auto;
+	align-items: center;
+	justify-content: center;
+	width: var(--size-4-6);
+	height: var(--size-4-6);
+	margin-inline-start: auto;
+	padding: 0;
+	border: 0;
+	border-radius: var(--radius-s);
+	color: var(--nav-item-color);
+	background: transparent;
+	opacity: 0;
+	pointer-events: none;
+	cursor: pointer;
+	transition:
+		opacity 100ms ease,
+		color 100ms ease,
+		background-color 100ms ease;
+}
+
+.folder-open-button svg {
+	width: var(--icon-xs);
+	height: var(--icon-xs);
+	stroke-width: var(--icon-stroke);
+}
+
+.folder-open-button-host:hover > .folder-open-button,
+.folder-open-button-host:focus-within > .folder-open-button,
+.folder-open-button:focus-visible {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.folder-open-button:hover,
+.folder-open-button:focus-visible {
+	color: var(--nav-item-color-hover);
+	background-color: var(--nav-item-background-hover);
+}
+
+.folder-open-button:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: -2px;
+}
+
