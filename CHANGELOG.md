@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1 - 2026-10-23
+
+### Fixed
+
+- Restore and foreground an existing Windows Explorer window for the selected folder instead of leaving it flashing on the taskbar.
+- Fall back to Electron's folder-opening API when native foreground activation is unavailable.
+
 ## 1.0.0 - 2026-07-14
 
 ### Features

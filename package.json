@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-folder-open-button",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "Open folders from Obsidian's file explorer with a hover button.",
 	"main": "main.js",
 	"type": "module",

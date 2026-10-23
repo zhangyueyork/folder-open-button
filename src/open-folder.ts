@@ -7,6 +7,7 @@ import {
 	Platform,
 	normalizePath,
 } from 'obsidian';
+import { activateFolderInWindowsExplorer } from './windows-explorer';
 
 const NOTICE_DURATION_MS = 5000;
 
@@ -30,6 +31,11 @@ export async function openFolderInSystemExplorer(
 
 		if (!folderStat.isDirectory()) {
 			throw new Error('目标路径不是文件夹。');
+		}
+
+		const wasActivated = await activateFolderInWindowsExplorer(absolutePath);
+		if (wasActivated) {
+			return;
 		}
 
 		const errorMessage = await shell.openPath(absolutePath);

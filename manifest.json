@@ -1,7 +1,7 @@
 {
 	"id": "folder-open-button",
 	"name": "Folder Open Button",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"minAppVersion": "1.5.0",
 	"description": "Adds a hover button to folders in the file explorer for opening them directly in the system file manager.",
 	"author": "zhangyueyork",
