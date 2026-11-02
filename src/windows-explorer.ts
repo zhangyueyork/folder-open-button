@@ -1,7 +1,111 @@
-import { execFile } from 'node:child_process';
+import { execFile, type ChildProcess } from 'node:child_process';
+import { unlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const TARGET_PATH_ENV = 'OBSIDIAN_FOLDER_OPEN_BUTTON_TARGET';
-const ACTIVATION_TIMEOUT_MS = 4000;
+const ACTIVATION_TIMEOUT_MS = 2500;
+const WINDOW_RETRY_COUNT = 6;
+const WINDOW_RETRY_DELAY_MS = 50;
+const PROBE_TIMEOUT_MS = 1200;
+const PROBE_SCRIPT_PATH = join(
+	tmpdir(),
+	`obsidian-folder-open-button-${process.pid}.js`,
+);
+
+let activeActivationProcess: ChildProcess | null = null;
+let probeScriptPromise: Promise<string> | null = null;
+
+export type ExplorerWindowProbeResult =
+	| 'activated'
+	| 'found'
+	| 'not-found'
+	| 'unavailable';
+
+const PROBE_EXPLORER_SCRIPT = String.raw`
+var targetPath = WScript.Arguments.Item(0).replace(/[\\\/]+$/, '').toLowerCase();
+var shellApplication = new ActiveXObject('Shell.Application');
+var windows = shellApplication.Windows();
+var windowShell = new ActiveXObject('WScript.Shell');
+
+for (var index = 0; index < windows.Count; index++) {
+    try {
+        var explorerWindow = windows.Item(index);
+        var windowPath = String(explorerWindow.Document.Folder.Self.Path)
+            .replace(/[\\\/]+$/, '')
+            .toLowerCase();
+        if (windowPath === targetPath) {
+            var activated = windowShell.AppActivate(String(explorerWindow.LocationName));
+            WScript.Quit(activated ? 0 : 3);
+        }
+    } catch (error) {
+        // Shell.Application also enumerates non-file-system shell windows.
+    }
+}
+
+WScript.Quit(2);
+`;
+
+function ensureProbeScript(): Promise<string> {
+	probeScriptPromise ??= writeFile(PROBE_SCRIPT_PATH, PROBE_EXPLORER_SCRIPT, {
+		encoding: 'utf8',
+	}).then(() => PROBE_SCRIPT_PATH);
+	return probeScriptPromise;
+}
+
+export async function prepareWindowsExplorerIntegration(): Promise<void> {
+	try {
+		await ensureProbeScript();
+	} catch {
+		// The regular Electron opening path remains available without the probe.
+	}
+}
+
+export async function disposeWindowsExplorerIntegration(): Promise<void> {
+	if (activeActivationProcess !== null) {
+		activeActivationProcess.kill();
+		activeActivationProcess = null;
+	}
+
+	probeScriptPromise = null;
+	try {
+		await unlink(PROBE_SCRIPT_PATH);
+	} catch {
+		// The file may not exist if preparation failed or cleanup already ran.
+	}
+}
+
+export async function probeAndActivateFolderInWindowsExplorer(
+	absolutePath: string,
+): Promise<ExplorerWindowProbeResult> {
+	try {
+		const scriptPath = await ensureProbeScript();
+		return await new Promise((resolve) => {
+			execFile(
+				'cscript.exe',
+				['//NoLogo', scriptPath, absolutePath],
+				{
+					encoding: 'utf8',
+					timeout: PROBE_TIMEOUT_MS,
+					windowsHide: true,
+				},
+				(error) => {
+					if (error === null) {
+						resolve('activated');
+					} else if (error.code === 2) {
+						resolve('not-found');
+					} else if (error.code === 3) {
+						resolve('found');
+					} else {
+						resolve('unavailable');
+					}
+				},
+			);
+		});
+	} catch {
+		return 'unavailable';
+	}
+}
 
 // PowerShell is used only as a short-lived bridge to the Windows Shell COM API
 // and user32. The target path is supplied through the child environment rather
@@ -56,16 +160,15 @@ function Find-ExplorerWindow([string] $path) {
     return [IntPtr]::Zero
 }
 
-$windowHandle = Find-ExplorerWindow $targetPath
-if ($windowHandle -eq [IntPtr]::Zero) {
-    $shell.Explore($targetPath)
+$windowHandle = [IntPtr]::Zero
+for ($attempt = 0; $attempt -lt ${WINDOW_RETRY_COUNT}; $attempt++) {
+    $windowHandle = Find-ExplorerWindow $targetPath
+    if ($windowHandle -ne [IntPtr]::Zero) {
+        break
+    }
 
-    for ($attempt = 0; $attempt -lt 30; $attempt++) {
-        Start-Sleep -Milliseconds 50
-        $windowHandle = Find-ExplorerWindow $targetPath
-        if ($windowHandle -ne [IntPtr]::Zero) {
-            break
-        }
+    if ($attempt -lt ${WINDOW_RETRY_COUNT - 1}) {
+        Start-Sleep -Milliseconds ${WINDOW_RETRY_DELAY_MS}
     }
 }
 
@@ -90,30 +193,45 @@ const ENCODED_ACTIVATION_SCRIPT = Buffer.from(
 export function activateFolderInWindowsExplorer(
 	absolutePath: string,
 ): Promise<boolean> {
+	if (activeActivationProcess !== null) {
+		activeActivationProcess.kill();
+		activeActivationProcess = null;
+	}
+
 	return new Promise((resolve) => {
-		execFile(
-			'powershell.exe',
-			[
-				'-NoLogo',
-				'-NoProfile',
-				'-NonInteractive',
-				'-ExecutionPolicy',
-				'Bypass',
-				'-EncodedCommand',
-				ENCODED_ACTIVATION_SCRIPT,
-			],
-			{
-				encoding: 'utf8',
-				env: {
-					...process.env,
-					[TARGET_PATH_ENV]: absolutePath,
+		try {
+			let activationProcess: ChildProcess | null = null;
+			activationProcess = execFile(
+				'powershell.exe',
+				[
+					'-NoLogo',
+					'-NoProfile',
+					'-NonInteractive',
+					'-ExecutionPolicy',
+					'Bypass',
+					'-EncodedCommand',
+					ENCODED_ACTIVATION_SCRIPT,
+				],
+				{
+					encoding: 'utf8',
+					env: {
+						...process.env,
+						[TARGET_PATH_ENV]: absolutePath,
+					},
+					timeout: ACTIVATION_TIMEOUT_MS,
+					windowsHide: true,
 				},
-				timeout: ACTIVATION_TIMEOUT_MS,
-				windowsHide: true,
-			},
-			(error) => {
-				resolve(error === null);
-			},
-		);
+				(error) => {
+					if (activeActivationProcess === activationProcess) {
+						activeActivationProcess = null;
+					}
+					resolve(error === null);
+				},
+			);
+			activeActivationProcess = activationProcess;
+		} catch {
+			activeActivationProcess = null;
+			resolve(false);
+		}
 	});
 }

@@ -7,7 +7,10 @@ import {
 	Platform,
 	normalizePath,
 } from 'obsidian';
-import { activateFolderInWindowsExplorer } from './windows-explorer';
+import {
+	activateFolderInWindowsExplorer,
+	probeAndActivateFolderInWindowsExplorer,
+} from './windows-explorer';
 
 const NOTICE_DURATION_MS = 5000;
 
@@ -33,12 +36,23 @@ export async function openFolderInSystemExplorer(
 			throw new Error('目标路径不是文件夹。');
 		}
 
-		const wasActivated = await activateFolderInWindowsExplorer(absolutePath);
-		if (wasActivated) {
+		const probeResult = await probeAndActivateFolderInWindowsExplorer(
+			absolutePath,
+		);
+		if (probeResult === 'activated') {
+			return;
+		}
+		if (probeResult === 'found') {
+			void activateFolderInWindowsExplorer(absolutePath);
 			return;
 		}
 
-		const errorMessage = await shell.openPath(absolutePath);
+		// No matching window was found (or probing is unavailable), so open one
+		// immediately and use PowerShell only as a non-blocking focus fallback.
+		const openPathPromise = shell.openPath(absolutePath);
+		void activateFolderInWindowsExplorer(absolutePath);
+
+		const errorMessage = await openPathPromise;
 		if (errorMessage) {
 			throw new Error(errorMessage);
 		}

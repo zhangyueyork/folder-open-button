@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.2 - 2026-11-02
+
+### Changed
+
+- Open the folder immediately and perform foreground activation asynchronously, removing the visible PowerShell startup delay.
+- Cancel an older activation helper when another folder is clicked, so rapid clicks keep focus on the newest target.
+- Probe for an existing Explorer window with the lightweight Windows Script Host before opening, preventing duplicate windows without a resident process.
+
 ## 1.0.1 - 2026-10-23
 
 ### Fixed
