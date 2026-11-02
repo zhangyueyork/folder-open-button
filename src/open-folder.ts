@@ -9,7 +9,7 @@ import {
 } from 'obsidian';
 import {
 	activateFolderInWindowsExplorer,
-	probeAndActivateFolderInWindowsExplorer,
+	openOrActivateFolderInWindowsExplorer,
 } from './windows-explorer';
 
 const NOTICE_DURATION_MS = 5000;
@@ -36,19 +36,23 @@ export async function openFolderInSystemExplorer(
 			throw new Error('目标路径不是文件夹。');
 		}
 
-		const probeResult = await probeAndActivateFolderInWindowsExplorer(
+		const openResult = await openOrActivateFolderInWindowsExplorer(
 			absolutePath,
 		);
-		if (probeResult === 'activated') {
+		if (openResult === 'activated') {
 			return;
 		}
-		if (probeResult === 'found') {
+		if (
+			openResult === 'found' ||
+			openResult === 'opened' ||
+			openResult === 'open-requested'
+		) {
 			void activateFolderInWindowsExplorer(absolutePath);
 			return;
 		}
 
-		// No matching window was found (or probing is unavailable), so open one
-		// immediately and use PowerShell only as a non-blocking focus fallback.
+		// Windows Script Host can be disabled by policy. Preserve availability by
+		// falling back to Electron, then make a best-effort focus request.
 		const openPathPromise = shell.openPath(absolutePath);
 		void activateFolderInWindowsExplorer(absolutePath);
 

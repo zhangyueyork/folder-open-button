@@ -99,3 +99,27 @@ Date: 2026-10-23
 - Unit tests distinguish activated, found-but-not-focused, missing, and unavailable probe results.
 - Existing-window results must never invoke `shell.openPath()`.
 - Real Windows smoke testing must verify exact-path reuse, foreground focus, and elapsed click-to-window time.
+
+## New-window foreground revision (2026-11-02)
+
+### Root cause
+
+- Version 1.0.2 correctly activated existing Explorer windows, but new folders were still created by Electron after the lightweight probe.
+- Windows could create that Explorer window in the background and only flash its taskbar button.
+- A newly created window can briefly report successful activation and then lose focus again while Explorer finishes initializing.
+- If the lightweight helper timed out after requesting a window, treating that timeout as unavailable caused Electron to open a delayed duplicate.
+
+### Final design and decision log
+
+| Decision | Alternatives | Reason |
+| --- | --- | --- |
+| Let the same short-lived JScript helper detect or create the target window | Create new windows with Electron | Preserves the foreground privilege associated with the original Obsidian click |
+| Return a distinct `opened` result for a newly created window | Treat all successful activations identically | New Explorer initialization needs one delayed strong focus pass |
+| Run PowerShell focus asynchronously for `opened`, `found`, and `open-requested` results | Open through Electron again | Improves focus without creating another window |
+| Treat helper timeout or termination after `Explore` as `open-requested` | Treat it as unavailable | Prevents a second opener from racing the first request |
+| Keep Electron only as the fallback when Windows Script Host cannot start | Remove all fallback behavior | Supports systems where script execution is disabled by policy |
+
+### Verification
+
+- Automated tests cover existing, opened, late-observed, timed-out, and unavailable helper results.
+- A real new-folder test must start with zero matching windows, end with one matching window, retain one after a delayed recheck, and show the target Explorer title in the foreground.

@@ -20,7 +20,7 @@ vi.mock('node:fs/promises', () => ({
 
 vi.mock('../src/windows-explorer', () => ({
 	activateFolderInWindowsExplorer: activateMock,
-	probeAndActivateFolderInWindowsExplorer: probeMock,
+	openOrActivateFolderInWindowsExplorer: probeMock,
 }));
 
 import { openFolderInSystemExplorer } from '../src/open-folder';
@@ -39,34 +39,22 @@ describe('openFolderInSystemExplorer', () => {
 		openPathMock.mockReset();
 		probeMock.mockReset();
 		statMock.mockReset();
-		probeMock.mockResolvedValue('not-found');
+		probeMock.mockResolvedValue('activated');
 		statMock.mockResolvedValue({ isDirectory: () => true });
 	});
 
-	it('opens a missing folder before starting non-blocking activation', async () => {
+	it('uses the Windows helper to open and activate a missing folder', async () => {
 		const callOrder: string[] = [];
 		probeMock.mockImplementation(() => {
-			callOrder.push('probe');
-			return Promise.resolve('not-found');
-		});
-		openPathMock.mockImplementation(() => {
-			callOrder.push('open');
-			return Promise.resolve('');
-		});
-		activateMock.mockImplementation(() => {
-			callOrder.push('activate');
-			return new Promise(() => undefined);
+			callOrder.push('open-or-activate');
+			return Promise.resolve('activated');
 		});
 
 		await openFolderInSystemExplorer(createApp(), '项目/含 空格&符号');
 
-		expect(callOrder).toEqual(['probe', 'open', 'activate']);
-		expect(openPathMock).toHaveBeenCalledWith(
-			'C:\\My Vault\\项目\\含 空格&符号',
-		);
-		expect(activateMock).toHaveBeenCalledWith(
-			'C:\\My Vault\\项目\\含 空格&符号',
-		);
+		expect(callOrder).toEqual(['open-or-activate']);
+		expect(openPathMock).not.toHaveBeenCalled();
+		expect(activateMock).not.toHaveBeenCalled();
 	});
 
 	it('activates an existing folder without opening a duplicate', async () => {
@@ -90,7 +78,32 @@ describe('openFolderInSystemExplorer', () => {
 		);
 	});
 
-	it('keeps a successful open independent from activation failure', async () => {
+	it('does not duplicate a new window whose COM handle appears late', async () => {
+		probeMock.mockResolvedValue('open-requested');
+		activateMock.mockResolvedValue(true);
+
+		await openFolderInSystemExplorer(createApp(), '项目/新目录');
+
+		expect(openPathMock).not.toHaveBeenCalled();
+		expect(activateMock).toHaveBeenCalledWith(
+			'C:\\My Vault\\项目\\新目录',
+		);
+	});
+
+	it('strongly reactivates a newly created window after initialization', async () => {
+		probeMock.mockResolvedValue('opened');
+		activateMock.mockResolvedValue(true);
+
+		await openFolderInSystemExplorer(createApp(), '项目/新目录');
+
+		expect(openPathMock).not.toHaveBeenCalled();
+		expect(activateMock).toHaveBeenCalledWith(
+			'C:\\My Vault\\项目\\新目录',
+		);
+	});
+
+	it('falls back to Electron when Windows Script Host is unavailable', async () => {
+		probeMock.mockResolvedValue('unavailable');
 		activateMock.mockResolvedValue(false);
 		openPathMock.mockResolvedValue('');
 

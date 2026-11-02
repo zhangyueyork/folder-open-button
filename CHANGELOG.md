@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.3 - 2026-11-02
+
+### Fixed
+
+- Create and activate new Explorer windows from the same short-lived Windows helper so they no longer remain flashing on the taskbar.
+- Distinguish newly initialized windows from existing windows and apply a delayed strong focus pass without opening a duplicate.
+- Treat helper timeouts after an open request as handled, preventing a delayed Electron fallback from creating a second window.
+
 ## 1.0.2 - 2026-11-02
 
 ### Changed

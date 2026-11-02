@@ -19,7 +19,7 @@ vi.mock('node:fs/promises', () => ({
 
 import {
 	activateFolderInWindowsExplorer,
-	probeAndActivateFolderInWindowsExplorer,
+	openOrActivateFolderInWindowsExplorer,
 } from '../src/windows-explorer';
 
 describe('activateFolderInWindowsExplorer', () => {
@@ -39,13 +39,16 @@ describe('activateFolderInWindowsExplorer', () => {
 		const path = 'C:\\中文 目录\\a&b';
 
 		await expect(
-			probeAndActivateFolderInWindowsExplorer(path),
+			openOrActivateFolderInWindowsExplorer(path),
 		).resolves.toBe('activated');
 
 		const [executable, arguments_, options] = execFileMock.mock.calls[0] ?? [];
 		expect(executable).toBe('cscript.exe');
 		expect(arguments_).toContain(path);
-		expect(options).toMatchObject({ timeout: 1200, windowsHide: true });
+		expect(options).toMatchObject({ timeout: 1800, windowsHide: true });
+		expect(writeFileMock.mock.calls[0]?.[1]).toContain(
+			'shellApplication.Explore',
+		);
 	});
 
 	it('distinguishes a missing window from a found window that could not focus', async () => {
@@ -61,11 +64,49 @@ describe('activateFolderInWindowsExplorer', () => {
 		});
 
 		await expect(
-			probeAndActivateFolderInWindowsExplorer('C:\\missing'),
-		).resolves.toBe('not-found');
+			openOrActivateFolderInWindowsExplorer('C:\\missing'),
+		).resolves.toBe('open-requested');
 		await expect(
-			probeAndActivateFolderInWindowsExplorer('C:\\existing'),
+			openOrActivateFolderInWindowsExplorer('C:\\existing'),
 		).resolves.toBe('found');
+	});
+
+	it('does not request a duplicate when the open helper times out', async () => {
+		execFileMock.mockImplementation((...parameters: unknown[]) => {
+			const callback = parameters.at(-1) as (
+				error: (Error & {
+					code?: string;
+					killed?: boolean;
+					signal?: string | null;
+				}) | null,
+			) => void;
+			const error = Object.assign(new Error('Timed out after opening'), {
+				code: 'ETIMEDOUT',
+				killed: true,
+				signal: 'SIGTERM',
+			});
+			queueMicrotask(() => callback(error));
+			return { kill: vi.fn() };
+		});
+
+		await expect(
+			openOrActivateFolderInWindowsExplorer('C:\\new-folder'),
+		).resolves.toBe('open-requested');
+	});
+
+	it('marks a newly opened window for delayed strong activation', async () => {
+		execFileMock.mockImplementation((...parameters: unknown[]) => {
+			const callback = parameters.at(-1) as (
+				error: (Error & { code?: number }) | null,
+			) => void;
+			const error = Object.assign(new Error('Opened'), { code: 4 });
+			queueMicrotask(() => callback(error));
+			return { kill: vi.fn() };
+		});
+
+		await expect(
+			openOrActivateFolderInWindowsExplorer('C:\\new-folder'),
+		).resolves.toBe('opened');
 	});
 
 	it('passes the path through the environment instead of script arguments', async () => {

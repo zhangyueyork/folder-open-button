@@ -7,7 +7,7 @@ const TARGET_PATH_ENV = 'OBSIDIAN_FOLDER_OPEN_BUTTON_TARGET';
 const ACTIVATION_TIMEOUT_MS = 2500;
 const WINDOW_RETRY_COUNT = 6;
 const WINDOW_RETRY_DELAY_MS = 50;
-const PROBE_TIMEOUT_MS = 1200;
+const PROBE_TIMEOUT_MS = 1800;
 const PROBE_SCRIPT_PATH = join(
 	tmpdir(),
 	`obsidian-folder-open-button-${process.pid}.js`,
@@ -16,34 +16,56 @@ const PROBE_SCRIPT_PATH = join(
 let activeActivationProcess: ChildProcess | null = null;
 let probeScriptPromise: Promise<string> | null = null;
 
-export type ExplorerWindowProbeResult =
+export type ExplorerWindowOpenResult =
 	| 'activated'
 	| 'found'
-	| 'not-found'
+	| 'opened'
+	| 'open-requested'
 	| 'unavailable';
 
 const PROBE_EXPLORER_SCRIPT = String.raw`
 var targetPath = WScript.Arguments.Item(0).replace(/[\\\/]+$/, '').toLowerCase();
 var shellApplication = new ActiveXObject('Shell.Application');
-var windows = shellApplication.Windows();
 var windowShell = new ActiveXObject('WScript.Shell');
+var fileSystem = new ActiveXObject('Scripting.FileSystemObject');
 
-for (var index = 0; index < windows.Count; index++) {
-    try {
-        var explorerWindow = windows.Item(index);
-        var windowPath = String(explorerWindow.Document.Folder.Self.Path)
-            .replace(/[\\\/]+$/, '')
-            .toLowerCase();
-        if (windowPath === targetPath) {
-            var activated = windowShell.AppActivate(String(explorerWindow.LocationName));
-            WScript.Quit(activated ? 0 : 3);
+function findExplorerWindow() {
+    var windows = shellApplication.Windows();
+    for (var index = 0; index < windows.Count; index++) {
+        try {
+            var explorerWindow = windows.Item(index);
+            var windowPath = String(explorerWindow.Document.Folder.Self.Path)
+                .replace(/[\\\/]+$/, '')
+                .toLowerCase();
+            if (windowPath === targetPath) {
+                return explorerWindow;
+            }
+        } catch (error) {
+            // Shell.Application also enumerates non-file-system shell windows.
         }
-    } catch (error) {
-        // Shell.Application also enumerates non-file-system shell windows.
     }
+    return null;
 }
 
-WScript.Quit(2);
+var explorerWindow = findExplorerWindow();
+if (explorerWindow === null) {
+    shellApplication.Explore(WScript.Arguments.Item(0));
+    var folderName = fileSystem.GetFileName(targetPath);
+    for (var attempt = 0; attempt < 24; attempt++) {
+        WScript.Sleep(50);
+        if (windowShell.AppActivate(folderName)) {
+            // A newly created Explorer can lose focus again while it finishes
+            // initialization, so request one delayed strong activation too.
+            WScript.Quit(4);
+        }
+    }
+    // Explore was requested, but the new window could not be activated in time.
+    WScript.Quit(2);
+}
+
+explorerWindow.Visible = true;
+var activated = windowShell.AppActivate(String(explorerWindow.LocationName));
+WScript.Quit(activated ? 0 : 3);
 `;
 
 function ensureProbeScript(): Promise<string> {
@@ -75,9 +97,9 @@ export async function disposeWindowsExplorerIntegration(): Promise<void> {
 	}
 }
 
-export async function probeAndActivateFolderInWindowsExplorer(
+export async function openOrActivateFolderInWindowsExplorer(
 	absolutePath: string,
-): Promise<ExplorerWindowProbeResult> {
+): Promise<ExplorerWindowOpenResult> {
 	try {
 		const scriptPath = await ensureProbeScript();
 		return await new Promise((resolve) => {
@@ -92,10 +114,17 @@ export async function probeAndActivateFolderInWindowsExplorer(
 				(error) => {
 					if (error === null) {
 						resolve('activated');
-					} else if (error.code === 2) {
-						resolve('not-found');
+					} else if (
+						error.code === 2 ||
+						error.code === 'ETIMEDOUT' ||
+						error.killed ||
+						(error.signal !== undefined && error.signal !== null)
+					) {
+						resolve('open-requested');
 					} else if (error.code === 3) {
 						resolve('found');
+					} else if (error.code === 4) {
+						resolve('opened');
 					} else {
 						resolve('unavailable');
 					}
